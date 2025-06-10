@@ -1,6 +1,7 @@
 import { Pool, PoolConfig } from "pg";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { URL } from "url";
 
 // Type definitions for better TypeScript support
 interface SSLConfig {
@@ -20,23 +21,31 @@ class DatabasePool {
 
     // Prepare SSL configuration
     let sslConfig: any = false;
+    let connectionString = process.env.DATABASE_URL;
 
     if (
-      process.env.DATABASE_URL.includes("sslmode=require") ||
+      connectionString.includes("sslmode=require") ||
       process.env.NODE_ENV === "production"
     ) {
       // Enhanced DigitalOcean detection logic (generic patterns)
-      const dbUrl = process.env.DATABASE_URL || "";
+      const dbUrl = connectionString || "";
       const isDigitalOceanManaged = 
         dbUrl.includes('.db.ondigitalocean.com') || 
         dbUrl.includes('ondigitalocean.com') ||
         dbUrl.includes('db-postgresql-') || // Generic DO database pattern
-        process.env.NODE_ENV === "production"; // Force bypass in production
+        process.env.NODE_ENV === "production";
       
       if (isDigitalOceanManaged) {
-        // For DigitalOcean/production, completely disable SSL
-        sslConfig = false; // Completely disable SSL for managed connections
-        console.log("🔒 Using DigitalOcean/production mode - SSL COMPLETELY DISABLED");
+        // For DigitalOcean/production, completely disable SSL by modifying
+        // the connection string AND setting the ssl config to false.
+        
+        // Remove sslmode from the connection string to prevent pg from overriding our config
+        const url = new URL(dbUrl);
+        url.searchParams.delete('sslmode');
+        connectionString = url.toString();
+        
+        sslConfig = false; // Completely disable SSL
+        console.log("🔒 Using DigitalOcean/production mode - SSL forced OFF.");
       } else {
         // For external databases, use strict SSL validation
         sslConfig = {
@@ -85,7 +94,7 @@ class DatabasePool {
     }
 
     const config: PoolConfig = {
-      connectionString: process.env.DATABASE_URL,
+      connectionString: connectionString,
       ssl: sslConfig,
       // Connection pool settings optimized for App Platform
       min: parseInt(process.env.MIN_CONNECTIONS || "2"),
