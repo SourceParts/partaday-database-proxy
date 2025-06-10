@@ -1,11 +1,9 @@
 name: partaday-database-proxy
 services:
 - name: api
+  # Use Docker instead of GitHub
+  dockerfile_path: Dockerfile
   source_dir: /
-  github:
-    repo: SourceParts/partaday-database-proxy
-    branch: main
-    deploy_on_push: true
   build_command: npm run build
   run_command: npm start
   environment_slug: node-js
@@ -39,24 +37,4 @@ services:
     value: ${PROXY_SECRET_KEY}
     type: SECRET
   - key: ALLOWED_ORIGINS
-    value: "https://partaday.com,https://www.partaday.com"
-
-# Optional: If you want to create the database in the same app
-# databases:
-# - name: partaday-db
-#   engine: PG
-#   version: "15"
-#   size: db-s-dev-database
-#   num_nodes: 1
-
-# Optional: If you want to use a static site for admin interface
-# static_sites:
-# - name: admin-ui
-#   source_dir: /admin
-#   github:
-#     repo: your-username/partaday-admin-ui
-#     branch: main
-#   build_command: npm run build
-#   output_dir: /dist
-#   routes:
-#   - path: /admin 
+    value: "https://partaday.com,https://www.partaday.com" 
