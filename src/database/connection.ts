@@ -25,29 +25,18 @@ class DatabasePool {
       process.env.DATABASE_URL.includes("sslmode=require") ||
       process.env.NODE_ENV === "production"
     ) {
-      // Enhanced DigitalOcean detection logic
+      // Enhanced DigitalOcean detection logic (generic patterns)
       const dbUrl = process.env.DATABASE_URL || "";
       const isDigitalOceanManaged = 
-        dbUrl.includes('.i.db.ondigitalocean.com') || 
-        dbUrl.includes('db-postgresql-sfo3-partaday') ||
+        dbUrl.includes('.db.ondigitalocean.com') || 
         dbUrl.includes('ondigitalocean.com') ||
+        dbUrl.includes('db-postgresql-') || // Generic DO database pattern
         process.env.NODE_ENV === "production"; // Force bypass in production
       
-      console.log("🔍 SSL Configuration Debug:", {
-        hasSSLMode: dbUrl.includes("sslmode=require"),
-        isProduction: process.env.NODE_ENV === "production",
-        isDigitalOceanManaged,
-        dbUrlHint: dbUrl.substring(0, 50) + "..." // Show first 50 chars for debugging
-      });
-      
       if (isDigitalOceanManaged) {
-        // For DigitalOcean/production, completely bypass SSL validation
-        sslConfig = {
-          rejectUnauthorized: false,
-          checkServerIdentity: () => undefined, // Bypass all certificate checks
-          requestCert: false,
-        };
-        console.log("🔒 Using DigitalOcean/production mode - bypassing ALL SSL validation");
+        // For DigitalOcean/production, completely disable SSL
+        sslConfig = false; // Completely disable SSL for managed connections
+        console.log("🔒 Using DigitalOcean/production mode - SSL COMPLETELY DISABLED");
       } else {
         // For external databases, use strict SSL validation
         sslConfig = {
