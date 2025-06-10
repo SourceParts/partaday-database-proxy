@@ -1,0 +1,62 @@
+name: partaday-database-proxy
+services:
+- name: api
+  source_dir: /
+  github:
+    repo: your-username/partaday-database-proxy
+    branch: main
+    deploy_on_push: true
+  build_command: npm run build
+  run_command: npm start
+  environment_slug: node-js
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 3000
+  routes:
+  - path: /
+  health_check:
+    http_path: /health
+    initial_delay_seconds: 30
+    period_seconds: 10
+    timeout_seconds: 5
+    success_threshold: 1
+    failure_threshold: 3
+  envs:
+  - key: NODE_ENV
+    value: production
+  - key: PORT
+    value: "3000"
+  - key: DATABASE_URL
+    value: ${DATABASE_URL}
+    type: SECRET
+  - key: DATABASE_CA_CERT
+    value: ${DATABASE_CA_CERT}
+    type: SECRET
+  - key: PROXY_API_KEY
+    value: ${PROXY_API_KEY}
+    type: SECRET
+  - key: PROXY_SECRET_KEY
+    value: ${PROXY_SECRET_KEY}
+    type: SECRET
+  - key: ALLOWED_ORIGINS
+    value: "https://partaday.com,https://www.partaday.com"
+
+# Optional: If you want to create the database in the same app
+# databases:
+# - name: partaday-db
+#   engine: PG
+#   version: "15"
+#   size: db-s-dev-database
+#   num_nodes: 1
+
+# Optional: If you want to use a static site for admin interface
+# static_sites:
+# - name: admin-ui
+#   source_dir: /admin
+#   github:
+#     repo: your-username/partaday-admin-ui
+#     branch: main
+#   build_command: npm run build
+#   output_dir: /dist
+#   routes:
+#   - path: /admin 
