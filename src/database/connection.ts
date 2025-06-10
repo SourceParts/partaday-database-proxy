@@ -85,8 +85,16 @@ class DatabasePool {
       }
     }
 
+    // Manually parse the DATABASE_URL to have more control over the configuration,
+    // especially to ensure our SSL settings are not overridden by the connection string.
+    const dbUrl = new URL(connectionString);
+
     const config: PoolConfig = {
-      connectionString: connectionString,
+      user: dbUrl.username,
+      password: dbUrl.password,
+      host: dbUrl.hostname,
+      port: parseInt(dbUrl.port, 10),
+      database: dbUrl.pathname.slice(1), // Remove the leading '/'
       ssl: sslConfig,
       // Connection pool settings optimized for App Platform
       min: parseInt(process.env.MIN_CONNECTIONS || "2"),
