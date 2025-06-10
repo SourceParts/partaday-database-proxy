@@ -5,6 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "start": "node dist/app.js",
+    "debug:env": "echo '--- ENVIRONMENT VARIABLES ---' && printenv && echo '--- END ---' && exit 0",
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
     "test": "jest",
