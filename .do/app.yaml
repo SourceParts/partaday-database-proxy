@@ -2,10 +2,10 @@ name: partaday-database-proxy
 services:
 - name: api
   source_dir: /
-  github:
-    repo: your-username/partaday-database-proxy
-    branch: main
-    deploy_on_push: true
+        github:
+        repo: SourceParts/partaday-database-proxy
+        branch: main
+        deploy_on_push: true
   build_command: npm run build
   run_command: npm start
   environment_slug: node-js
