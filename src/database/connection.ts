@@ -3,12 +3,6 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { URL } from "url";
 
-// Type definitions for better TypeScript support
-interface SSLConfig {
-  rejectUnauthorized: boolean;
-  ca?: string;
-}
-
 class DatabasePool {
   private pool: Pool;
   private static instance: DatabasePool;
@@ -29,23 +23,21 @@ class DatabasePool {
     ) {
       // Enhanced DigitalOcean detection logic (generic patterns)
       const dbUrl = connectionString || "";
-      const isDigitalOceanManaged = 
-        dbUrl.includes('.db.ondigitalocean.com') || 
-        dbUrl.includes('ondigitalocean.com') ||
-        dbUrl.includes('db-postgresql-') || // Generic DO database pattern
+      const isDigitalOceanManaged =
+        dbUrl.includes(".db.ondigitalocean.com") ||
+        dbUrl.includes("ondigitalocean.com") ||
+        dbUrl.includes("db-postgresql-") || // Generic DO database pattern
         process.env.NODE_ENV === "production";
-      
+
       if (isDigitalOceanManaged) {
-        // For DigitalOcean/production, completely disable SSL by modifying
-        // the connection string AND setting the ssl config to false.
-        
-        // Remove sslmode from the connection string to prevent pg from overriding our config
-        const url = new URL(dbUrl);
-        url.searchParams.delete('sslmode');
-        connectionString = url.toString();
-        
-        sslConfig = false; // Completely disable SSL
-        console.log("🔒 Using DigitalOcean/production mode - SSL forced OFF.");
+        // For DigitalOcean/production, we must use SSL, but we disable
+        // the certificate verification because it's a self-signed cert.
+        sslConfig = {
+          rejectUnauthorized: false,
+        };
+        console.log(
+          "🔒 Using DigitalOcean/production mode - SSL enabled, verification disabled."
+        );
       } else {
         // For external databases, use strict SSL validation
         sslConfig = {
