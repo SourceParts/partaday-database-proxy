@@ -25,54 +25,73 @@ class DatabasePool {
       process.env.DATABASE_URL.includes("sslmode=require") ||
       process.env.NODE_ENV === "production"
     ) {
-      // Check if this is a DigitalOcean managed database connection
-      const isManagedConnection = process.env.DATABASE_URL.includes('.i.db.ondigitalocean.com');
+      // Enhanced DigitalOcean detection logic
+      const dbUrl = process.env.DATABASE_URL || "";
+      const isDigitalOceanManaged = 
+        dbUrl.includes('.i.db.ondigitalocean.com') || 
+        dbUrl.includes('db-postgresql-sfo3-partaday') ||
+        dbUrl.includes('ondigitalocean.com') ||
+        process.env.NODE_ENV === "production"; // Force bypass in production
+      
+      console.log("🔍 SSL Configuration Debug:", {
+        hasSSLMode: dbUrl.includes("sslmode=require"),
+        isProduction: process.env.NODE_ENV === "production",
+        isDigitalOceanManaged,
+        dbUrlHint: dbUrl.substring(0, 50) + "..." // Show first 50 chars for debugging
+      });
+      
+      if (isDigitalOceanManaged) {
+        // For DigitalOcean/production, completely bypass SSL validation
+        sslConfig = {
+          rejectUnauthorized: false,
+          checkServerIdentity: () => undefined, // Bypass all certificate checks
+          requestCert: false,
+        };
+        console.log("🔒 Using DigitalOcean/production mode - bypassing ALL SSL validation");
+      } else {
+        // For external databases, use strict SSL validation
+        sslConfig = {
+          rejectUnauthorized: true,
+        };
 
-      sslConfig = {
-        rejectUnauthorized: !isManagedConnection, // Allow self-signed certs for managed DBs
-      };
+        // Add CA certificate if provided (for external connections)
+        let caCert: string | undefined;
 
-      // Add CA certificate if provided (for external connections)
-      let caCert: string | undefined;
-
-      // Check for certificate file first
-      if (process.env.DATABASE_CA_CERT_FILE) {
-        try {
-          const certPath = join(
-            process.cwd(),
-            process.env.DATABASE_CA_CERT_FILE
-          );
-          caCert = readFileSync(certPath, "utf8");
-          console.log(
-            "🔒 Using CA certificate from file:",
-            process.env.DATABASE_CA_CERT_FILE
-          );
-        } catch (error) {
-          console.error("❌ Failed to read CA certificate file:", error);
+        // Check for certificate file first
+        if (process.env.DATABASE_CA_CERT_FILE) {
+          try {
+            const certPath = join(
+              process.cwd(),
+              process.env.DATABASE_CA_CERT_FILE
+            );
+            caCert = readFileSync(certPath, "utf8");
+            console.log(
+              "🔒 Using CA certificate from file:",
+              process.env.DATABASE_CA_CERT_FILE
+            );
+          } catch (error) {
+            console.error("❌ Failed to read CA certificate file:", error);
+          }
         }
-      }
 
-      // Fall back to inline certificate
-      if (!caCert && process.env.DATABASE_CA_CERT) {
-        // Handle both single-line and multi-line certificate formats
-        caCert = process.env.DATABASE_CA_CERT;
+        // Fall back to inline certificate
+        if (!caCert && process.env.DATABASE_CA_CERT) {
+          // Handle both single-line and multi-line certificate formats
+          caCert = process.env.DATABASE_CA_CERT;
 
-        // Replace literal \n with actual newlines if needed
-        if (caCert.includes("\\n")) {
-          caCert = caCert.replace(/\\n/g, "\n");
+          // Replace literal \n with actual newlines if needed
+          if (caCert.includes("\\n")) {
+            caCert = caCert.replace(/\\n/g, "\n");
+          }
+
+          console.log("🔒 Using inline CA certificate for SSL connection");
         }
 
-        console.log("🔒 Using inline CA certificate for SSL connection");
-      }
-
-      if (caCert && !isManagedConnection) {
-        sslConfig.ca = caCert;
-      }
-
-      if (isManagedConnection) {
-        console.log("🔒 Using DigitalOcean managed database connection (allowing self-signed certs)");
-      } else if (!caCert) {
-        console.warn("⚠️  SSL required but no CA certificate provided");
+        if (caCert) {
+          sslConfig.ca = caCert;
+        } else {
+          console.warn("⚠️  SSL required but no CA certificate provided");
+        }
       }
     }
 
