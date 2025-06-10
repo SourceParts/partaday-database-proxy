@@ -1,4 +1,5 @@
 name: partaday-database-proxy
+region: sfo
 services:
 - name: api
   source_dir: /
@@ -39,7 +40,7 @@ services:
     value: ${PROXY_SECRET_KEY}
     type: SECRET
   - key: ALLOWED_ORIGINS
-    value: "https://partaday.com,https://www.partaday.com"
+    value: "https://partaday.com"
 
 # Optional: If you want to create the database in the same app
 # databases:
