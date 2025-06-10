@@ -25,11 +25,14 @@ class DatabasePool {
       process.env.DATABASE_URL.includes("sslmode=require") ||
       process.env.NODE_ENV === "production"
     ) {
+      // Check if this is a DigitalOcean managed database connection
+      const isManagedConnection = process.env.DATABASE_URL.includes('.i.db.ondigitalocean.com');
+
       sslConfig = {
-        rejectUnauthorized: true,
+        rejectUnauthorized: !isManagedConnection, // Allow self-signed certs for managed DBs
       };
 
-      // Add CA certificate if provided
+      // Add CA certificate if provided (for external connections)
       let caCert: string | undefined;
 
       // Check for certificate file first
@@ -62,9 +65,13 @@ class DatabasePool {
         console.log("🔒 Using inline CA certificate for SSL connection");
       }
 
-      if (caCert) {
+      if (caCert && !isManagedConnection) {
         sslConfig.ca = caCert;
-      } else {
+      }
+
+      if (isManagedConnection) {
+        console.log("🔒 Using DigitalOcean managed database connection (allowing self-signed certs)");
+      } else if (!caCert) {
         console.warn("⚠️  SSL required but no CA certificate provided");
       }
     }
