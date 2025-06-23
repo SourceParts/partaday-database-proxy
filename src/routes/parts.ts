@@ -303,6 +303,106 @@ router.get('/meta/manufacturers', asyncHandler(async (req: Request, res: Respons
   }
 }))
 
+// Get today's featured part
+router.get('/featured/today', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    
+    // First, check if there's a specific featured part for today using the featured_parts table
+    const query = `
+      SELECT 
+        p.id,
+        p.sku,
+        p.name,
+        p.description,
+        p.category,
+        p.manufacturer,
+        p.specifications,
+        p.image_urls,
+        p.base_price,
+        p.currency,
+        p.availability_status,
+        p.stock_quantity,
+        p.featured,
+        fp.featured_date,
+        p.tags,
+        p.created_at,
+        p.updated_at
+      FROM featured_parts fp
+      INNER JOIN parts p ON p.id = fp.part_id
+      WHERE fp.featured_date = $1
+      LIMIT 1
+    `
+    const result = await dbPool.query(query, [today])
+
+    if (result.rows.length > 0) {
+      res.json({
+        success: true,
+        data: result.rows[0]
+      })
+    } else {
+      // Try to get or set today's featured part using the database function
+      const functionQuery = `
+        SELECT get_or_set_todays_featured_part() as part_id
+      `
+      const functionResult = await dbPool.query(functionQuery)
+      
+      if (functionResult.rows[0].part_id) {
+        // Now fetch the full part details
+        const partQuery = `
+          SELECT 
+            p.id,
+            p.sku,
+            p.name,
+            p.description,
+            p.category,
+            p.manufacturer,
+            p.specifications,
+            p.image_urls,
+            p.base_price,
+            p.currency,
+            p.availability_status,
+            p.stock_quantity,
+            p.featured,
+            $1 as featured_date,
+            p.tags,
+            p.created_at,
+            p.updated_at
+          FROM parts p
+          WHERE p.id = $2
+        `
+        const partResult = await dbPool.query(partQuery, [today, functionResult.rows[0].part_id])
+        
+        if (partResult.rows.length > 0) {
+          res.json({
+            success: true,
+            data: partResult.rows[0]
+          })
+        } else {
+          res.json({
+            success: true,
+            data: null,
+            message: 'No parts available to feature'
+          })
+        }
+      } else {
+        res.json({
+          success: true,
+          data: null,
+          message: 'No parts available to feature'
+        })
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ Error fetching today\'s featured part:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch today\'s featured part'
+    })
+  }
+}))
+
 // Get recent parts for RSS feed
 router.get('/feed/recent', asyncHandler(async (req: Request, res: Response) => {
   try {
