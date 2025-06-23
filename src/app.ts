@@ -9,6 +9,8 @@ import healthRouter from "./routes/health";
 import quotesRouter from "./routes/quotes";
 import suggestionsRouter from "./routes/suggestions";
 import contactSupportRouter from "./routes/contact-support";
+import adminRouter from "./routes/admin";
+import partsRouter from "./routes/parts";
 
 // Load environment variables
 config();
@@ -61,13 +63,17 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Health check route (no auth required)
 app.use("/health", healthRouter);
 
-// Authentication for all API routes
+// Admin routes (no auth middleware - handled internally)
+app.use("/api/admin", adminRouter);
+
+// Authentication for all other API routes
 app.use("/api", authenticateRequest);
 
 // API routes
 app.use("/api/quotes", quotesRouter);
 app.use("/api/suggestions", suggestionsRouter);
 app.use("/api/contact-support", contactSupportRouter);
+app.use("/api/parts", partsRouter);
 
 // Root endpoint
 app.get("/", (req, res) => {
@@ -77,9 +83,11 @@ app.get("/", (req, res) => {
     status: "operational",
     endpoints: {
       health: "/health",
+      admin: "/api/admin",
       quotes: "/api/quotes",
       suggestions: "/api/suggestions",
       contactSupport: "/api/contact-support",
+      parts: "/api/parts",
     },
   });
 });

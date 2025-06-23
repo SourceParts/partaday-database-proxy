@@ -1,6 +1,15 @@
 import express, { Request, Response } from 'express'
 import { asyncHandler } from '../middleware/errorHandler'
 import dbPool from '../database/connection'
+import { 
+  partSuggestionSchema, 
+  suggestionFiltersSchema, 
+  updateSuggestionStatusSchema,
+  PartSuggestion,
+  SuggestionFilters,
+  UpdateSuggestionStatus
+} from '../schemas/validation-schemas'
+import { z } from 'zod'
 
 const router = express.Router()
 
@@ -9,8 +18,8 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   try {
     console.log('💡 Creating part suggestion:', req.body)
     
-    // TODO: Add Zod validation schema
-    const data = req.body
+    // Validate request body
+    const validatedData = partSuggestionSchema.parse(req.body)
     const referenceId = `PS-${Date.now()}`
 
     // Begin transaction
@@ -18,9 +27,6 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     try {
       await client.query('BEGIN')
 
-      // TODO: Implement actual database operations
-      // This is a placeholder - replace with your schema
-      /*
       // Create or get user
       const userQuery = `
         INSERT INTO users (email, first_name, last_name, company)
@@ -33,10 +39,10 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
         RETURNING id
       `
       const userResult = await client.query(userQuery, [
-        data.email,
-        data.firstName,
-        data.lastName,
-        data.company
+        validatedData.email,
+        validatedData.firstName,
+        validatedData.lastName,
+        validatedData.company || null
       ])
 
       // Create part suggestion
@@ -44,33 +50,37 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
         INSERT INTO part_suggestions (
           user_id, part_name, part_number, manufacturer, category,
           description, why_important, availability_info,
-          additional_notes, reference_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, created_at
+          additional_notes, reference_id, source, user_agent,
+          ip_address, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'submitted')
+        RETURNING id, reference_id, status, created_at
       `
       const suggestionResult = await client.query(suggestionQuery, [
         userResult.rows[0].id,
-        data.partName,
-        data.partNumber,
-        data.manufacturer,
-        data.category,
-        data.description,
-        data.whyImportant,
-        data.availabilityInfo,
-        data.additionalNotes,
-        referenceId
+        validatedData.partName,
+        validatedData.partNumber || null,
+        validatedData.manufacturer || null,
+        validatedData.category || null,
+        validatedData.description || null,
+        validatedData.whyImportant || null,
+        validatedData.availabilityInfo || null,
+        validatedData.additionalNotes || null,
+        referenceId,
+        validatedData.source || null,
+        validatedData.userAgent || null,
+        validatedData.ipAddress || null
       ])
-      */
 
       await client.query('COMMIT')
 
+      const result = suggestionResult.rows[0]
       res.json({
         success: true,
         message: 'Part suggestion submitted successfully',
         data: {
-          id: referenceId,
-          status: 'submitted',
-          created_at: new Date().toISOString()
+          id: result.reference_id,
+          status: result.status,
+          created_at: result.created_at
         }
       })
 
@@ -83,53 +93,126 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 
   } catch (error) {
     console.error('❌ Error creating part suggestion:', error)
-    res.json({
-      success: false,
-      message: 'Failed to submit part suggestion'
-    })
+    
+    if (error instanceof z.ZodError) {
+      res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors
+      })
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to submit part suggestion'
+      })
+    }
   }
 }))
 
 // Get part suggestions (for admin)
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   try {
-    const { page = 1, limit = 50 } = req.query
-    const offset = (Number(page) - 1) * Number(limit)
+    // Validate query parameters
+    const filters = suggestionFiltersSchema.parse(req.query)
+    const offset = (filters.page - 1) * filters.limit
 
-    // TODO: Implement actual query
-    /*
+    // Build WHERE clause
+    const whereClauses: string[] = []
+    const params: any[] = []
+    let paramCount = 1
+
+    if (filters.status) {
+      whereClauses.push(`ps.status = $${paramCount}`)
+      params.push(filters.status)
+      paramCount++
+    }
+
+    if (filters.category) {
+      whereClauses.push(`ps.category = $${paramCount}`)
+      params.push(filters.category)
+      paramCount++
+    }
+
+    if (filters.startDate) {
+      whereClauses.push(`ps.created_at >= $${paramCount}`)
+      params.push(filters.startDate)
+      paramCount++
+    }
+
+    if (filters.endDate) {
+      whereClauses.push(`ps.created_at <= $${paramCount}`)
+      params.push(filters.endDate)
+      paramCount++
+    }
+
+    const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM part_suggestions ps
+      ${whereClause}
+    `
+    const countResult = await dbPool.query(countQuery, params)
+    const total = parseInt(countResult.rows[0].total)
+
+    // Get paginated results
+    params.push(filters.limit, offset)
     const query = `
       SELECT 
-        ps.*,
+        ps.id,
+        ps.reference_id,
+        ps.part_name,
+        ps.part_number,
+        ps.manufacturer,
+        ps.category,
+        ps.description,
+        ps.why_important,
+        ps.availability_info,
+        ps.additional_notes,
+        ps.status,
+        ps.admin_notes,
+        ps.source,
+        ps.created_at,
+        ps.updated_at,
         u.email,
         u.first_name,
         u.last_name,
         u.company
       FROM part_suggestions ps
       JOIN users u ON ps.user_id = u.id
+      ${whereClause}
       ORDER BY ps.created_at DESC
-      LIMIT $1 OFFSET $2
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
     `
-    const result = await dbPool.query(query, [limit, offset])
-    */
+    const result = await dbPool.query(query, params)
 
-    // Placeholder response
     res.json({
       success: true,
-      data: [],
+      data: result.rows,
       pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total: 0
+        page: filters.page,
+        limit: filters.limit,
+        total,
+        totalPages: Math.ceil(total / filters.limit)
       }
     })
 
   } catch (error) {
     console.error('❌ Error fetching part suggestions:', error)
-    res.json({
-      success: false,
-      message: 'Failed to fetch part suggestions'
-    })
+    
+    if (error instanceof z.ZodError) {
+      res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors
+      })
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch part suggestions'
+      })
+    }
   }
 }))
 
@@ -138,11 +221,25 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 
-    // TODO: Implement actual query
-    /*
     const query = `
       SELECT 
-        ps.*,
+        ps.id,
+        ps.reference_id,
+        ps.part_name,
+        ps.part_number,
+        ps.manufacturer,
+        ps.category,
+        ps.description,
+        ps.why_important,
+        ps.availability_info,
+        ps.additional_notes,
+        ps.status,
+        ps.admin_notes,
+        ps.source,
+        ps.user_agent,
+        ps.ip_address,
+        ps.created_at,
+        ps.updated_at,
         u.email,
         u.first_name,
         u.last_name,
@@ -152,20 +249,23 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
       WHERE ps.reference_id = $1
     `
     const result = await dbPool.query(query, [id])
-    */
 
-    // Placeholder response
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'Part suggestion not found'
+      })
+      return
+    }
+
     res.json({
       success: true,
-      data: {
-        id,
-        status: 'not_found'
-      }
+      data: result.rows[0]
     })
 
   } catch (error) {
     console.error('❌ Error fetching suggestion:', error)
-    res.json({
+    res.status(500).json({
       success: false,
       message: 'Failed to fetch suggestion'
     })
@@ -173,37 +273,73 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 }))
 
 // Update suggestion status (for admin)
-router.put('/:id/status', asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { status } = req.body
+    
+    // Validate request body
+    const validatedData = updateSuggestionStatusSchema.parse(req.body)
 
-    // TODO: Implement actual update
-    /*
-    const query = `
-      UPDATE part_suggestions 
-      SET status = $1, updated_at = NOW()
-      WHERE reference_id = $2
-      RETURNING *
+    // Build update query
+    const setClauses: string[] = ['status = $2', 'updated_at = NOW()']
+    const params: any[] = [id, validatedData.status]
+    let paramCount = 3
+
+    if (validatedData.adminNotes !== undefined) {
+      setClauses.push(`admin_notes = $${paramCount}`)
+      params.push(validatedData.adminNotes)
+      paramCount++
+    }
+
+    const updateQuery = `
+      UPDATE part_suggestions
+      SET ${setClauses.join(', ')}
+      WHERE reference_id = $1
+      RETURNING id, reference_id, status, updated_at
     `
-    const result = await dbPool.query(query, [status, id])
-    */
+
+    const result = await dbPool.query(updateQuery, params)
+
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'Part suggestion not found'
+      })
+      return
+    }
+
+    // Log the update in audit table
+    await dbPool.query(`
+      INSERT INTO audit_logs (
+        table_name, record_id, action, changed_by, changes
+      ) VALUES ('part_suggestions', $1, 'update', $2, $3)
+    `, [
+      result.rows[0].id,
+      'admin', // This should come from authenticated user
+      JSON.stringify({ status: validatedData.status, ...validatedData })
+    ])
 
     res.json({
       success: true,
-      message: 'Suggestion status updated',
-      data: {
-        id,
-        status
-      }
+      message: 'Suggestion status updated successfully',
+      data: result.rows[0]
     })
 
   } catch (error) {
     console.error('❌ Error updating suggestion status:', error)
-    res.json({
-      success: false,
-      message: 'Failed to update suggestion status'
-    })
+    
+    if (error instanceof z.ZodError) {
+      res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors
+      })
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update suggestion status'
+      })
+    }
   }
 }))
 

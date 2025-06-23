@@ -1,6 +1,15 @@
 import express, { Request, Response } from "express";
 import { asyncHandler } from "../middleware/errorHandler";
 import dbPool from "../database/connection";
+import { 
+  contactSupportSchema, 
+  contactFiltersSchema, 
+  updateContactStatusSchema,
+  ContactSupport,
+  ContactFilters,
+  UpdateContactStatus
+} from '../schemas/validation-schemas'
+import { z } from 'zod'
 
 const router = express.Router();
 
@@ -11,8 +20,8 @@ router.post(
     try {
       console.log("📞 Creating contact support request:", req.body);
 
-      // TODO: Add Zod validation schema
-      const data = req.body;
+      // Validate request body
+      const validatedData = contactSupportSchema.parse(req.body);
       const referenceId = `CS-${Date.now()}`;
 
       // Begin transaction
@@ -20,58 +29,65 @@ router.post(
       try {
         await client.query("BEGIN");
 
-        // TODO: Implement actual database operations
-        // This is a placeholder - replace with your schema
-        /*
-      // Create or get user
-      const userQuery = `
-        INSERT INTO users (email, name, company, phone)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (email) DO UPDATE SET
-          name = EXCLUDED.name,
-          company = EXCLUDED.company,
-          phone = EXCLUDED.phone,
-          updated_at = NOW()
-        RETURNING id
-      `
-      const userResult = await client.query(userQuery, [
-        data.email,
-        data.name,
-        data.company,
-        data.phone
-      ])
+        // Create or get user
+        // Note: contact support uses 'name' field instead of first_name/last_name
+        const userQuery = `
+          INSERT INTO users (email, first_name, last_name, company, phone)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (email) DO UPDATE SET
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            company = EXCLUDED.company,
+            phone = EXCLUDED.phone,
+            updated_at = NOW()
+          RETURNING id
+        `
+        // Split name into first and last name
+        const nameParts = validatedData.name.trim().split(' ')
+        const firstName = nameParts[0] || validatedData.name
+        const lastName = nameParts.slice(1).join(' ') || ''
+        
+        const userResult = await client.query(userQuery, [
+          validatedData.email,
+          firstName,
+          lastName,
+          validatedData.company || null,
+          validatedData.phone || null
+        ])
 
-      // Create contact support request
-      const contactQuery = `
-        INSERT INTO contact_support_requests (
-          user_id, subject, message, part_id, part_name, priority,
-          source, user_agent, ip_address, reference_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id, created_at
-      `
-      const contactResult = await client.query(contactQuery, [
-        userResult.rows[0].id,
-        data.subject,
-        data.message,
-        data.partId,
-        data.partName,
-        data.priority,
-        data.source,
-        data.userAgent,
-        data.ipAddress,
-        referenceId
-      ])
-      */
+        // Create contact support request
+        const contactQuery = `
+          INSERT INTO contact_support_requests (
+            user_id, subject, message, category, priority,
+            part_id, part_name, source, user_agent, ip_address,
+            reference_id, status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open')
+          RETURNING id, reference_id, status, created_at
+        `
+        const contactResult = await client.query(contactQuery, [
+          userResult.rows[0].id,
+          validatedData.subject,
+          validatedData.message,
+          validatedData.category,
+          validatedData.priority,
+          validatedData.partId || null,
+          validatedData.partName || null,
+          validatedData.source || null,
+          validatedData.userAgent || null,
+          validatedData.ipAddress || null,
+          referenceId
+        ])
 
         await client.query("COMMIT");
 
+        const result = contactResult.rows[0]
         res.json({
           success: true,
           message: "Contact support request created successfully",
           data: {
-            id: referenceId,
-            status: "submitted",
-            created_at: new Date().toISOString(),
+            id: result.reference_id,
+            status: result.status,
+            created_at: result.created_at,
           },
         });
       } catch (error) {
@@ -82,10 +98,19 @@ router.post(
       }
     } catch (error) {
       console.error("❌ Error creating contact support request:", error);
-      res.json({
-        success: false,
-        message: "Failed to create contact support request",
-      });
+      
+      if (error instanceof z.ZodError) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors: error.errors
+        })
+      } else {
+        res.status(500).json({
+          success: false,
+          message: "Failed to create contact support request",
+        });
+      }
     }
   })
 );
@@ -95,56 +120,125 @@ router.get(
   "/",
   asyncHandler(async (req: Request, res: Response) => {
     try {
-      const { page = 1, limit = 50, status, priority } = req.query;
-      const offset = (Number(page) - 1) * Number(limit);
+      // Validate query parameters
+      const filters = contactFiltersSchema.parse(req.query);
+      const offset = (filters.page - 1) * filters.limit;
 
-      // TODO: Implement actual query with filters
-      /*
-    let whereClause = 'WHERE 1=1'
-    const queryParams = [limit, offset]
-    let paramIndex = 3
+      // Build WHERE clause
+      const whereClauses: string[] = [];
+      const params: any[] = [];
+      let paramCount = 1;
 
-    if (status) {
-      whereClause += ` AND csr.status = $${paramIndex++}`
-      queryParams.splice(-2, 0, status)
-    }
+      if (filters.status) {
+        whereClauses.push(`csr.status = $${paramCount}`);
+        params.push(filters.status);
+        paramCount++;
+      }
 
-    if (priority) {
-      whereClause += ` AND csr.priority = $${paramIndex++}`
-      queryParams.splice(-2, 0, priority)
-    }
+      if (filters.priority) {
+        whereClauses.push(`csr.priority = $${paramCount}`);
+        params.push(filters.priority);
+        paramCount++;
+      }
 
-    const query = `
-      SELECT 
-        csr.*,
-        u.email,
-        u.name,
-        u.company
-      FROM contact_support_requests csr
-      JOIN users u ON csr.user_id = u.id
-      ${whereClause}
-      ORDER BY csr.created_at DESC
-      LIMIT $1 OFFSET $2
-    `
-    const result = await dbPool.query(query, queryParams)
-    */
+      if (filters.category) {
+        whereClauses.push(`csr.category = $${paramCount}`);
+        params.push(filters.category);
+        paramCount++;
+      }
 
-      // Placeholder response
+      if (filters.assignedTo) {
+        whereClauses.push(`csr.assigned_to = $${paramCount}`);
+        params.push(filters.assignedTo);
+        paramCount++;
+      }
+
+      if (filters.startDate) {
+        whereClauses.push(`csr.created_at >= $${paramCount}`);
+        params.push(filters.startDate);
+        paramCount++;
+      }
+
+      if (filters.endDate) {
+        whereClauses.push(`csr.created_at <= $${paramCount}`);
+        params.push(filters.endDate);
+        paramCount++;
+      }
+
+      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+      // Get total count
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM contact_support_requests csr
+        ${whereClause}
+      `;
+      const countResult = await dbPool.query(countQuery, params);
+      const total = parseInt(countResult.rows[0].total);
+
+      // Get paginated results
+      params.push(filters.limit, offset);
+      const query = `
+        SELECT 
+          csr.id,
+          csr.reference_id,
+          csr.subject,
+          csr.message,
+          csr.category,
+          csr.priority,
+          csr.status,
+          csr.part_id,
+          csr.part_name,
+          csr.assigned_to,
+          csr.response_message,
+          csr.source,
+          csr.created_at,
+          csr.updated_at,
+          u.email,
+          u.first_name,
+          u.last_name,
+          u.company,
+          u.phone
+        FROM contact_support_requests csr
+        JOIN users u ON csr.user_id = u.id
+        ${whereClause}
+        ORDER BY 
+          CASE csr.priority 
+            WHEN 'urgent' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'normal' THEN 3
+            WHEN 'low' THEN 4
+          END,
+          csr.created_at DESC
+        LIMIT $${paramCount} OFFSET $${paramCount + 1}
+      `;
+      const result = await dbPool.query(query, params);
+
       res.json({
         success: true,
-        data: [],
+        data: result.rows,
         pagination: {
-          page: Number(page),
-          limit: Number(limit),
-          total: 0,
+          page: filters.page,
+          limit: filters.limit,
+          total,
+          totalPages: Math.ceil(total / filters.limit),
         },
       });
     } catch (error) {
       console.error("❌ Error fetching contact support requests:", error);
-      res.json({
-        success: false,
-        message: "Failed to fetch contact support requests",
-      });
+      
+      if (error instanceof z.ZodError) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors: error.errors
+        })
+      } else {
+        res.status(500).json({
+          success: false,
+          message: "Failed to fetch contact support requests",
+        });
+      }
     }
   })
 );
@@ -156,32 +250,50 @@ router.get(
     try {
       const { id } = req.params;
 
-      // TODO: Implement actual query
-      /*
-    const query = `
-      SELECT 
-        csr.*,
-        u.email,
-        u.name,
-        u.company
-      FROM contact_support_requests csr
-      JOIN users u ON csr.user_id = u.id
-      WHERE csr.reference_id = $1
-    `
-    const result = await dbPool.query(query, [id])
-    */
+      const query = `
+        SELECT 
+          csr.id,
+          csr.reference_id,
+          csr.subject,
+          csr.message,
+          csr.category,
+          csr.priority,
+          csr.status,
+          csr.part_id,
+          csr.part_name,
+          csr.assigned_to,
+          csr.response_message,
+          csr.source,
+          csr.user_agent,
+          csr.ip_address,
+          csr.created_at,
+          csr.updated_at,
+          u.email,
+          u.first_name,
+          u.last_name,
+          u.company,
+          u.phone
+        FROM contact_support_requests csr
+        JOIN users u ON csr.user_id = u.id
+        WHERE csr.reference_id = $1
+      `;
+      const result = await dbPool.query(query, [id]);
 
-      // Placeholder response
+      if (result.rows.length === 0) {
+        res.status(404).json({
+          success: false,
+          message: "Contact support request not found",
+        });
+        return;
+      }
+
       res.json({
         success: true,
-        data: {
-          id,
-          status: "not_found",
-        },
+        data: result.rows[0],
       });
     } catch (error) {
       console.error("❌ Error fetching contact support request:", error);
-      res.json({
+      res.status(500).json({
         success: false,
         message: "Failed to fetch contact support request",
       });
@@ -190,40 +302,80 @@ router.get(
 );
 
 // Update contact support request status (for admin)
-router.put(
-  "/:id/status",
+router.patch(
+  "/:id",
   asyncHandler(async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const { status, response_message } = req.body;
+      
+      // Validate request body
+      const validatedData = updateContactStatusSchema.parse(req.body);
 
-      // TODO: Implement actual update
-      /*
-    const query = `
-      UPDATE contact_support_requests 
-      SET status = $1, response_message = $2, updated_at = NOW()
-      WHERE reference_id = $3
-      RETURNING id, status, updated_at
-    `
-    const result = await dbPool.query(query, [status, response_message, id])
-    */
+      // Build update query
+      const setClauses: string[] = ['status = $2', 'updated_at = NOW()'];
+      const params: any[] = [id, validatedData.status];
+      let paramCount = 3;
 
-      // Placeholder response
+      if (validatedData.assignedTo !== undefined) {
+        setClauses.push(`assigned_to = $${paramCount}`);
+        params.push(validatedData.assignedTo);
+        paramCount++;
+      }
+
+      if (validatedData.responseMessage !== undefined) {
+        setClauses.push(`response_message = $${paramCount}`);
+        params.push(validatedData.responseMessage);
+        paramCount++;
+      }
+
+      const updateQuery = `
+        UPDATE contact_support_requests
+        SET ${setClauses.join(', ')}
+        WHERE reference_id = $1
+        RETURNING id, reference_id, status, updated_at
+      `;
+
+      const result = await dbPool.query(updateQuery, params);
+
+      if (result.rows.length === 0) {
+        res.status(404).json({
+          success: false,
+          message: "Contact support request not found",
+        });
+        return;
+      }
+
+      // Log the update in audit table
+      await dbPool.query(`
+        INSERT INTO audit_logs (
+          table_name, record_id, action, changed_by, changes
+        ) VALUES ('contact_support_requests', $1, 'update', $2, $3)
+      `, [
+        result.rows[0].id,
+        'admin', // This should come from authenticated user
+        JSON.stringify({ status: validatedData.status, ...validatedData })
+      ]);
+
       res.json({
         success: true,
-        message: "Contact support request status updated",
-        data: {
-          id,
-          status,
-          updated_at: new Date().toISOString(),
-        },
+        message: "Contact support request updated successfully",
+        data: result.rows[0],
       });
     } catch (error) {
       console.error("❌ Error updating contact support request:", error);
-      res.json({
-        success: false,
-        message: "Failed to update contact support request",
-      });
+      
+      if (error instanceof z.ZodError) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors: error.errors
+        })
+      } else {
+        res.status(500).json({
+          success: false,
+          message: "Failed to update contact support request",
+        });
+      }
     }
   })
 );
