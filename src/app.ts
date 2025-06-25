@@ -100,6 +100,29 @@ app.listen(PORT, () => {
   console.log(`🚀 Database proxy server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 API base URL: http://localhost:${PORT}/api`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Log environment variable status (without exposing values)
+  const envVars = {
+    DATABASE_URL: !!process.env.DATABASE_URL,
+    DATABASE_CA_CERT: !!process.env.DATABASE_CA_CERT,
+    DATABASE_CA_CERT_FILE: !!process.env.DATABASE_CA_CERT_FILE,
+    PROXY_API_KEY: !!process.env.PROXY_API_KEY,
+    PROXY_SECRET_KEY: !!process.env.PROXY_SECRET_KEY,
+    NODE_ENV: process.env.NODE_ENV || 'not set',
+    PORT: process.env.PORT || 'not set (using 3000)'
+  };
+  
+  console.log('🔧 Environment variables status:', envVars);
+  
+  // Test database connection on startup
+  import('./database/connection').then(({ default: dbPool }) => {
+    dbPool.healthCheck().then(result => {
+      console.log('✅ Database connection successful:', result);
+    }).catch(error => {
+      console.error('❌ Database connection failed on startup:', error.message);
+    });
+  });
 });
 
 export default app;

@@ -342,7 +342,7 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
     `, [
       result.rows[0].id,
       'admin', // This should come from authenticated user
-      JSON.stringify({ status: validatedData.status, ...validatedData })
+      JSON.stringify(validatedData)
     ])
 
     res.json({

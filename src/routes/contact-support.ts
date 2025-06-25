@@ -353,7 +353,7 @@ router.patch(
       `, [
         result.rows[0].id,
         'admin', // This should come from authenticated user
-        JSON.stringify({ status: validatedData.status, ...validatedData })
+        JSON.stringify(validatedData)
       ]);
 
       res.json({
